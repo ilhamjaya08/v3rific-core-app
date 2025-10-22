@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { FaArrowRight, FaCheckCircle, FaTimesCircle } from "react-icons/fa";
 
@@ -22,17 +22,36 @@ export type ProductSummary = {
   batch: string;
   status: string;
   mintedAt: string; // ISO date string
+  unitshash: string;
 };
 
 type ProducerDashboardProps = {
   profile: ProducerProfile;
   products: ProductSummary[];
+  isLoading?: boolean;
+  errorMessage?: string | null;
+  onRetry?: () => void;
+  onRefresh?: () => void;
 };
 
 const PAGE_SIZE = 10;
 
-export function ProducerDashboard({ profile, products }: ProducerDashboardProps) {
+export function ProducerDashboard({
+  profile,
+  products,
+  isLoading,
+  errorMessage,
+  onRetry,
+  onRefresh,
+}: ProducerDashboardProps) {
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, products.length]);
 
   const { items, totalPages } = useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
@@ -61,13 +80,25 @@ export function ProducerDashboard({ profile, products }: ProducerDashboardProps)
             This dashboard mirrors what the on-chain registry will expose once the integration is complete.
           </p>
         </div>
-        <Link
-          href="/producer/mint"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-5 py-3 text-sm font-semibold text-white shadow transition hover:bg-indigo-400"
-        >
-          Create new product
-          <FaArrowRight className="text-xs" />
-        </Link>
+        <div className="flex items-center gap-2">
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Refresh
+            </button>
+          )}
+          <Link
+            href="/producer/mint"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-5 py-3 text-sm font-semibold text-white shadow transition hover:bg-indigo-400"
+          >
+            Create new product
+            <FaArrowRight className="text-xs" />
+          </Link>
+        </div>
       </header>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -106,10 +137,29 @@ export function ProducerDashboard({ profile, products }: ProducerDashboardProps)
           <div>
             <h3 className="text-lg font-semibold text-slate-100">Recent product batches</h3>
             <p className="text-sm text-slate-400">
-              Once integrated, this table will list products minted by this producer. For now it shows mock data.
+              Listing products minted on the V3rific contract for this producer address.
             </p>
           </div>
         </header>
+
+        {isLoading && products.length > 0 && (
+          <div className="text-xs text-slate-500">Refreshing on-chain data…</div>
+        )}
+
+        {!isLoading && errorMessage && products.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+            <span>{errorMessage}</span>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center justify-center rounded-lg border border-amber-400/40 px-3 py-1 text-[11px] font-semibold text-amber-100 transition hover:bg-amber-500/10"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-white/10 text-left text-sm text-slate-200">
@@ -123,24 +173,78 @@ export function ProducerDashboard({ profile, products }: ProducerDashboardProps)
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {items.map((item) => (
-                <tr key={item.id} className="hover:bg-white/5">
-                  <td className="px-4 py-3 font-medium text-slate-100">{item.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{item.sku}</td>
-                  <td className="px-4 py-3 text-sm">{item.batch}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <StatusPill status={item.status} />
+              {isLoading && products.length === 0 && (
+                <tr className="animate-pulse">
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-40 rounded bg-white/10" />
                   </td>
-                  <td className="px-4 py-3 text-sm">{formatMintedDate(item.mintedAt)}</td>
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-28 rounded bg-white/10" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-24 rounded bg-white/10" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-20 rounded bg-white/10" />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-24 rounded bg-white/10" />
+                  </td>
                 </tr>
-              ))}
+              )}
+
+              {!isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">
+                    {errorMessage ? (
+                      <div className="space-y-3">
+                        <p>{errorMessage}</p>
+                        {onRetry && (
+                          <button
+                            type="button"
+                            onClick={onRetry}
+                            className="inline-flex items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-white/5"
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      "No products minted yet."
+                    )}
+                  </td>
+                </tr>
+              )}
+
+              {!isLoading &&
+                items.map((item) => (
+                  <tr key={item.id} className="hover:bg-white/5">
+                    <td className="px-4 py-3 text-sm">
+                      <div className="font-medium text-slate-100">{item.name}</div>
+                      <Link
+                        href={`/search/${item.unitshash}`}
+                        className="mt-1 inline-flex text-xs font-mono text-indigo-300 hover:underline"
+                      >
+                        #{item.unitshash.toUpperCase()}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">{item.sku}</td>
+                    <td className="px-4 py-3 text-sm">{item.batch}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <StatusPill status={item.status} />
+                    </td>
+                    <td className="px-4 py-3 text-sm">{formatMintedDate(item.mintedAt)}</td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
 
         <footer className="flex items-center justify-between gap-3">
           <span className="text-xs text-slate-400">
-            Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, products.length)} of {products.length} items
+            {products.length > 0
+              ? `Showing ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, products.length)} of ${products.length} items`
+              : "No items to display"}
           </span>
           <div className="flex items-center gap-2">
             <button

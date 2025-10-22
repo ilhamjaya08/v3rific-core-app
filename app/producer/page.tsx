@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import {
   useAccount,
+  usePublicClient,
   useReadContract,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
 import { sepolia } from "wagmi/chains";
-import type { BaseError } from "viem";
+import { parseAbiItem, type BaseError } from "viem";
 import { FaArrowLeft } from "react-icons/fa";
 
 import { ConnectSection } from "./components/ConnectSection";
@@ -23,9 +24,18 @@ import {
   type ProductSummary,
 } from "./components/ProducerDashboard";
 import { producerRegistryAbi } from "@/lib/abi/producerRegistry";
+import { v3rificAbi } from "@/lib/abi/v3rific";
+import { resolveIpfsUrl } from "@/lib/utils/ipfs";
 
 const registryAddress = (process.env.NEXT_PUBLIC_PRODUCER_REGISTRY_CONTRACT ??
   "0xa9ac835cF754793e9af5c9F3CE7c126b2aa165b6") as `0x${string}`;
+
+const v3rificAddress = (process.env.NEXT_PUBLIC_V3RIFIC_CONTRACT ??
+  "0x7eF608a4860fCc507FE7D5aa457769278ADE31fb") as `0x${string}`;
+
+const productMintedEvent = parseAbiItem(
+  "event ProductMinted(uint256 indexed tokenId, string cid, string unitshash, address indexed producer, bool verified, bool claimEnabled)"
+);
 
 type FeedbackState =
   | { type: "success"; message: string }
@@ -45,137 +55,26 @@ type RegistryProducer = {
   admin: `0x${string}`;
 };
 
-const mockProducts: ProductSummary[] = [
-  {
-    id: "0x01",
-    name: "Handmade Sketchbook - Midnight Series",
-    sku: "HND-2025-001",
-    batch: "Batch A",
-    status: "In transit",
-    mintedAt: "2025-02-01T08:00:00.000Z",
-  },
-  {
-    id: "0x02",
-    name: "Artisan Notebook - Copper Edition",
-    sku: "ART-2025-014",
-    batch: "Batch B",
-    status: "Minted",
-    mintedAt: "2025-01-26T09:45:00.000Z",
-  },
-  {
-    id: "0x03",
-    name: "Canvas Tote - Gallery Capsule",
-    sku: "TOTE-2025-003",
-    batch: "Batch A",
-    status: "Delivered",
-    mintedAt: "2025-01-20T11:30:00.000Z",
-  },
-  {
-    id: "0x04",
-    name: "Screen Print Poster - V3rific Launch",
-    sku: "PRT-2024-221",
-    batch: "Batch C",
-    status: "Minted",
-    mintedAt: "2025-01-12T13:10:00.000Z",
-  },
-  {
-    id: "0x05",
-    name: "Limited Vinyl - Ambient Series",
-    sku: "VIN-2025-005",
-    batch: "Batch A",
-    status: "In transit",
-    mintedAt: "2024-12-28T16:45:00.000Z",
-  },
-  {
-    id: "0x06",
-    name: "Custom Pins - Collector Pack",
-    sku: "PIN-2024-111",
-    batch: "Batch B",
-    status: "Delivered",
-    mintedAt: "2024-12-22T10:15:00.000Z",
-  },
-  {
-    id: "0x07",
-    name: "Letterpress Cards - Winter Set",
-    sku: "PRT-2024-198",
-    batch: "Batch B",
-    status: "Delivered",
-    mintedAt: "2024-12-15T18:05:00.000Z",
-  },
-  {
-    id: "0x08",
-    name: "Art Book - Residency Collection",
-    sku: "ART-2024-303",
-    batch: "Batch A",
-    status: "Minted",
-    mintedAt: "2024-12-05T07:55:00.000Z",
-  },
-  {
-    id: "0x09",
-    name: "Wearable Patch - Pioneer Series",
-    sku: "PAT-2024-412",
-    batch: "Batch C",
-    status: "In transit",
-    mintedAt: "2024-11-28T14:20:00.000Z",
-  },
-  {
-    id: "0x10",
-    name: "Signed Print - Artist Spotlight",
-    sku: "SPT-2024-510",
-    batch: "Batch A",
-    status: "Delivered",
-    mintedAt: "2024-11-20T09:35:00.000Z",
-  },
-  {
-    id: "0x06",
-    name: "Custom Pins - Collector Pack",
-    sku: "PIN-2024-111",
-    batch: "Batch B",
-    status: "Delivered",
-    mintedAt: "2024-12-22T10:15:00.000Z",
-  },
-  {
-    id: "0x07",
-    name: "Letterpress Cards - Winter Set",
-    sku: "PRT-2024-198",
-    batch: "Batch B",
-    status: "Delivered",
-    mintedAt: "2024-12-15T18:05:00.000Z",
-  },
-  {
-    id: "0x08",
-    name: "Art Book - Residency Collection",
-    sku: "ART-2024-303",
-    batch: "Batch A",
-    status: "Minted",
-    mintedAt: "2024-12-05T07:55:00.000Z",
-  },
-  {
-    id: "0x09",
-    name: "Wearable Patch - Pioneer Series",
-    sku: "PAT-2024-412",
-    batch: "Batch C",
-    status: "In transit",
-    mintedAt: "2024-11-28T14:20:00.000Z",
-  },
-  {
-    id: "0x10",
-    name: "Signed Print - Artist Spotlight",
-    sku: "SPT-2024-510",
-    batch: "Batch A",
-    status: "Delivered",
-    mintedAt: "2024-11-20T09:35:00.000Z",
-  },
-];
+type ProductFetchState =
+  | { status: "idle"; data: ProductSummary[] }
+  | { status: "loading"; data: ProductSummary[] }
+  | { status: "ready"; data: ProductSummary[] }
+  | { status: "error"; data: ProductSummary[]; message: string };
 
 export default function ProducerPage() {
   const { isConnected, address } = useAccount();
+  const publicClient = usePublicClient({ chainId: sepolia.id });
   const { writeContractAsync, isPending: isWriting } = useWriteContract();
 
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const [resetSignal, setResetSignal] = useState(0);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [productsState, setProductsState] = useState<ProductFetchState>({ status: "idle", data: [] });
+
+  useEffect(() => {
+    setProductsState({ status: "idle", data: [] });
+  }, [address]);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -267,6 +166,107 @@ export default function ProducerPage() {
     }
   }, [producerProfile]);
 
+  const refreshProducts = useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!producerProfile || !address || !publicClient) {
+        return;
+      }
+
+      setProductsState((prev) => ({ status: "loading", data: prev.data }));
+
+      try {
+        const fromBlock = getDeployBlock();
+        const logs = await publicClient.getLogs({
+          address: v3rificAddress,
+          event: productMintedEvent,
+          args: { producer: address },
+          fromBlock,
+          toBlock: "latest",
+        });
+
+        if (logs.length === 0) {
+          if (!isCancelled?.()) {
+            setProductsState({ status: "ready", data: [] });
+          }
+          return;
+        }
+
+        const entries = await Promise.all(
+          logs.map(async (log) => {
+            const unitshash = (log.args.unitshash as string).toLowerCase();
+            const tokenId = (log.args.tokenId as bigint).toString();
+            const verified = Boolean(log.args.verified);
+
+            const product = (await publicClient.readContract({
+              address: v3rificAddress,
+              abi: v3rificAbi,
+              functionName: "getByUnitshash",
+              args: [unitshash],
+            })) as ContractProduct;
+
+            const metadata = await fetchMetadataSafe(product.cid);
+            const mintedAtMs = Number(product.mintedAt) ? Number(product.mintedAt) * 1000 : 0;
+            const mintedAtIso = mintedAtMs ? new Date(mintedAtMs).toISOString() : new Date(0).toISOString();
+
+            const name = typeof metadata.name === "string" && metadata.name.trim() ? metadata.name : `Token ${tokenId}`;
+            const sku = typeof metadata.sku === "string" && metadata.sku.trim() ? metadata.sku : "N/A";
+            const batch = typeof metadata.batch === "string" && metadata.batch.trim() ? metadata.batch : "N/A";
+
+            const status = product.revoked
+              ? "Revoked"
+              : verified
+              ? "Verified"
+              : "Minted";
+
+            return {
+              id: tokenId,
+              name,
+              sku,
+              batch,
+              status,
+              mintedAt: mintedAtIso,
+              unitshash,
+            } satisfies ProductSummary;
+          })
+        );
+
+        const deduped = new Map<string, ProductSummary>();
+        for (const item of entries) {
+          deduped.set(item.unitshash, item);
+        }
+
+        const items = Array.from(deduped.values());
+        items.sort((a, b) => new Date(b.mintedAt).getTime() - new Date(a.mintedAt).getTime());
+
+        if (!isCancelled?.()) {
+          setProductsState({ status: "ready", data: items });
+        }
+      } catch (error) {
+        if (!isCancelled?.()) {
+          setProductsState((prev) => ({
+            status: "error",
+            data: prev.data,
+            message: parseError(error),
+          }));
+        }
+      }
+    },
+    [producerProfile, address, publicClient]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!producerProfile || !address || !publicClient) {
+      return;
+    }
+
+    void refreshProducts(() => cancelled);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [producerProfile, address, publicClient, refreshProducts]);
+
   const handleRegister = async (values: RegisterFormValues) => {
     if (!registryAddress) {
       setFeedback({
@@ -337,7 +337,19 @@ export default function ProducerPage() {
       );
     }
 
-    return <ProducerDashboard profile={producerProfile} products={mockProducts} />;
+    const isLoadingProducts = productsState.status === "loading" || productsState.status === "idle";
+    const productsError = productsState.status === "error" ? productsState.message : null;
+
+    return (
+      <ProducerDashboard
+        profile={producerProfile}
+        products={productsState.data}
+        isLoading={isLoadingProducts}
+        errorMessage={productsError}
+        onRetry={productsError ? () => void refreshProducts() : undefined}
+        onRefresh={() => void refreshProducts()}
+      />
+    );
   };
 
   return (
@@ -369,6 +381,16 @@ export default function ProducerPage() {
     </main>
   );
 }
+
+type ContractProduct = {
+  tokenId: bigint;
+  cid: string;
+  unitshash: string;
+  producer: `0x${string}`;
+  claimEnabled: boolean;
+  revoked: boolean;
+  mintedAt: bigint;
+};
 
 function LoadingState() {
   return (
@@ -412,6 +434,42 @@ function WalletStatus({ address }: { address?: `0x${string}` }) {
       </p>
     </div>
   );
+}
+
+function getDeployBlock(): bigint {
+  const value = process.env.NEXT_PUBLIC_V3RIFIC_DEPLOY_BLOCK;
+  if (!value) {
+    return BigInt(0);
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return BigInt(0);
+  }
+}
+
+async function fetchMetadataSafe(cid: string): Promise<Record<string, unknown>> {
+  if (!cid) {
+    return {};
+  }
+
+  try {
+    const url = resolveIpfsUrl(cid);
+    if (!url) {
+      return {};
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return {};
+    }
+
+    const json = (await response.json()) as Record<string, unknown>;
+    return json ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function parseError(error: unknown): string {

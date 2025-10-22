@@ -21,7 +21,7 @@ import { v3rificAbi } from "@/lib/abi/v3rific";
 import { createUnitshash } from "@/lib/utils/unitshash";
 
 const registryAddress = (process.env.NEXT_PUBLIC_PRODUCER_REGISTRY_CONTRACT ??
-  "0xa9ac835cF754793e9af5c9F3CE7c126b2aa165b6") as `0x${string}`;
+  " ") as `0x${string}`;
 
 const v3rificAddress = (process.env.NEXT_PUBLIC_V3RIFIC_CONTRACT ??
   "0xbe50a60c2207E7B3d094d7Fcc73EDD0068734e69") as `0x${string}`;
